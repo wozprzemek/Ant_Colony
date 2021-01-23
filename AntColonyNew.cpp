@@ -28,6 +28,7 @@ class Ant{
         int point_index;
         vector<int> visited; //visited cities
         vector<float> probabilities; //probabilities of going to each city
+        map<pair<int,int>,float> pheromone_map; //pheromones produced by one ant
         float Lk; //lenght of the tour
 
         Ant(){};
@@ -78,31 +79,123 @@ vector<Ant> spawn_ants(int n, vector<Point> points){
         ant.visited.push_back(spawn_point_index);
         ants.push_back(ant);
     }
+    generate_pheromones(points, n, ants);
     return ants;
+}
+bool check_if_visited(Ant ant, int point_index){
+    for(int i = 0; i < ant.visited.size(); i++){
+        if (ant.visited[i] == point_index){
+            return true;
+        }
+    }
+    return false;
 }
 
 //function that calculates distances between all cities
-map<pair<int,int>,float> calculate_point_distances(vector<Point> points){ 
-    pair<int, int> point_index_pair;
+map<pair<int,int>,float> calculate_point_distances(vector<Point> points, int n){ 
     float distance;
     map<pair<int,int>,float> point_distances;
-
-    for(int i = 0; i < points.size(); i++){
-        for(int j = i + 1; j < points.size(); j++){
-            point_index_pair.first = points[i].index;
-            point_index_pair.second = points[j].index;
+    for(int i = 0; i < n; i++){
+        for(int j = i + 1; j < n; j++){
+            pair<int, int> point_index_pair1(points[i].index, points[j].index);  //index pairs
+            pair<int, int> point_index_pair2(points[j].index, points[i].index); //reverse index pairs
             distance = dist(points[i], points[j]);
-            point_distances[point_index_pair] = distance;
+            point_distances[point_index_pair1] = distance;
+            point_distances[point_index_pair2] = distance;
         }
     }
     return point_distances;
 }
 
-// float calculate_probability(){
-//     float probability = 1;
+//function that generates pheromones map
+void generate_pheromones(vector<Point> points, int n, vector<Ant> ants){
+    float pheromones;
+    map<pair<int,int>,float> pheromone_map;
+    for(int i = 0; i < n; i++){
+        for(int j = i + 1; j < n; j++){
+            pair<int, int> point_index_pair1(points[i].index, points[j].index);  //index pairs
+            pair<int, int> point_index_pair2(points[j].index, points[i].index); //reverse index pairs
+            pheromones = 1;
+            pheromone_map[point_index_pair1] = pheromones;
+            pheromone_map[point_index_pair2] = pheromones;
+        }
+    }
+    for(Ant ant : ants){
+        ant.pheromone_map = pheromone_map;
+    }
+}
 
-//     return probability;
-// }
+
+//function that calculates probabilities
+void calculate_probabilities(Ant ant, map<pair<int,int>,float> point_distances, int n, Constants c){
+    ant.probabilities = vector<float>(n, 0.0); //clear probability vector
+    float probability, probability_n, probability_d;
+    for(int i = 0; i < n; i++){
+        if(check_if_visited(ant, i)){
+            ant.probabilities[i] = 0; //probability equals 0 if city is visited
+        }
+        else{ //probability is calculated using the formula (1)
+            probability_d = 0;
+            pair<int, int> p(ant.point_index, i);
+            probability_n = pow(ant.pheromone_map[p],c.alpha) * pow(1/point_distances[p],c.beta);
+            for(int j = 0; j < n; j++){
+                pair<int, int> p_d(ant.point_index, j);
+                probability_d += pow(ant.pheromone_map[p_d],c.alpha) * pow(1/point_distances[p_d],c.beta);
+            }
+            ant.probabilities[i] = probability_n / probability_d;
+        }
+    }
+}
+
+//function that selects next city
+int select_next_city(Ant ant, int n){
+    float random = ((double) rand() / (RAND_MAX));
+    int selected;
+    for(int i = 0; i < n; i++){
+        random -= ant.probabilities[i];
+        if (random <= 0){
+            return i;
+        }
+    }
+    return -15; //error return
+}
+
+map<pair<int,int>, float> update_trail_levels(Ant ant, map<pair<int,int>,float> pheromones_map,  map<pair<int,int>,float> point_distances, Constants c){
+    float Lk = ant.Lk;
+    for(int i = 1; i < ant.visited.size() - 1; i++){
+        pair<int, int> p(ant.visited[i-1], ant.visited[i]);
+        pheromones_map[p] += c.Q/Lk;
+    }
+    return pheromones_map;
+}
+
+float calculate_Lk(Ant ant, map<pair<int,int>,float> point_distances, int n){
+    float Lk = 0;
+    // for(int i = 1; i < ant.visited.size() - 1; i++){
+    //     pair<int, int> p(ant.visited[i-1], ant.visited[i]);
+    //     Lk += point_distances[p];
+    // }
+    for(int i = 1; i < n - 1; i++){
+        pair<int, int> p(ant.visited[i-1], ant.visited[i]);
+        Lk += point_distances[p];
+    }
+    return Lk;
+}
+
+map<pair<int,int>, float> calculate_total_pheromones(vector<Ant> ants, int n){
+    map<pair<int,int>, float> total_pheromones_map;
+    for(Ant ant : ants){
+        for(int i = 0; i < n; i++){
+            for(int j = i + 1; j < n; j++){
+                pair<int,int> p1(i,j);
+                pair<int,int> p2(j,i);
+                total_pheromones_map[p1] += ant.pheromone_map[p1];
+                total_pheromones_map[p2] += ant.pheromone_map[p2];
+            }
+        }
+    }
+    return total_pheromones_map;
+}
 
 
 int main(){
@@ -112,7 +205,7 @@ int main(){
     int minimum = 1000000;
     cin >> n;
     Constants c;
-    vector<float> pheromones = vector<float>(newton(n, 2), 1.0);
+    // vector<float> pheromones = vector<float>(newton(n, 2), 1.0);
     vector<Point> points;
     vector<Ant> ants;
 
@@ -121,8 +214,19 @@ int main(){
         points.push_back(Point(index-1, x, y));
     }
 
-    map<pair<int,int>,float> point_distances = calculate_point_distances(points);
+    map<pair<int,int>,float> point_distances = calculate_point_distances(points, n); //distances between all cities
 
-    pair<int,int> p(1,3);
-    cout << point_distances[p];
+    //main loop
+    for (int t = 0; t < iteration_number; t++){
+        //ant loop
+        for (Ant ant : ants){
+            //ant's move loop
+            for(int move; move < n; move++){
+                calculate_probabilities(ant, point_distances, n, c);
+                select_next_city(ant, n);
+            }
+            ant.Lk = calculate_Lk(ant, point_distances, n);
+        }
+
+    }
 }
